@@ -1,0 +1,14 @@
+[project]
+name = "simple-wake-word"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12.0"
+dependencies = [
+    "datasets>=4.5.0",
+    "g2p-en>=2.1.0",
+    "pyaudio>=0.2.14",
+    "soundfile>=0.13.1",
+    "torch>=2.10.0",
+    "torchcodec>=0.10.0",
+    "transformers>=5.2.0",
+]
