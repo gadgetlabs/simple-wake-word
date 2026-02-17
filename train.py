@@ -71,14 +71,23 @@ def text_to_phoneme_ids(text: str) -> list[int] | None:
 # DATASET WITH PREFETCHING
 # ═══════════════════════════════════════════════════════════════════════
 
-print("Loading LibriSpeech dataset (streaming)...")
+import os
 
-dataset = load_dataset(
-    "openslr/librispeech_asr",
-    "clean",
-    split="train.360",
-    streaming=True,
-)
+LOCAL_DATASET_PATH = "/workspace/librispeech_360"
+
+if os.path.exists(LOCAL_DATASET_PATH):
+    from datasets import Dataset
+    print("Loading LibriSpeech from local disk...")
+    dataset = Dataset.load_from_disk(LOCAL_DATASET_PATH)
+    dataset = dataset.shuffle(seed=42)
+else:
+    print("Loading LibriSpeech dataset (streaming)...")
+    dataset = load_dataset(
+        "openslr/librispeech_asr",
+        "clean",
+        split="train.360",
+        streaming=True,
+    )
 
 
 def collate_batch(iterator):
