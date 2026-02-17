@@ -1,4 +1,6 @@
 import re
+import threading
+import queue
 
 import torch
 import torch.nn as nn
@@ -11,13 +13,14 @@ from transformers import WhisperFeatureExtractor, WhisperModel
 # CONFIG
 # ═══════════════════════════════════════════════════════════════════════
 
-BATCH_SIZE = 32
+BATCH_SIZE = 128
 NUM_STEPS = 5000
 LR = 1e-3
 TEMPERATURE = 0.07
 LOG_EVERY = 100
 SAMPLE_RATE = 16000
 CHECKPOINT_PATH = "wake_word_weights.pt"
+PREFETCH_BATCHES = 4  # number of batches to prepare ahead on CPU
 
 PHONEMES = [
     "AA", "AE", "AH", "AO", "AW", "AY", "B", "CH", "D", "DH",
@@ -65,7 +68,7 @@ def text_to_phoneme_ids(text: str) -> list[int] | None:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# DATASET
+# DATASET WITH PREFETCHING
 # ═══════════════════════════════════════════════════════════════════════
 
 print("Loading LibriSpeech dataset (streaming)...")
@@ -79,7 +82,8 @@ dataset = load_dataset(
 
 
 def collate_batch(iterator):
-    """Pull samples from the streaming iterator until we have a full batch."""
+    """Pull samples from the streaming iterator until we have a full batch.
+    Returns mel features (on CPU) and phoneme ID lists."""
     audio_arrays = []
     phoneme_id_lists = []
 
@@ -102,8 +106,35 @@ def collate_batch(iterator):
         if len(audio_arrays) == BATCH_SIZE:
             break
 
-    return audio_arrays, phoneme_id_lists
+    if len(audio_arrays) < 2:
+        return None, None
 
+    # Do mel extraction on CPU in the background thread
+    mel_inputs = feature_extractor(
+        audio_arrays, sampling_rate=SAMPLE_RATE, return_tensors="pt",
+        padding="max_length", truncation=True,
+    )
+    return mel_inputs.input_features, phoneme_id_lists
+
+
+def prefetch_worker(iterator, q):
+    """Background thread that fills a queue with prepared batches."""
+    for _ in range(NUM_STEPS):
+        mel, phoneme_ids = collate_batch(iterator)
+        if mel is None:
+            break
+        q.put((mel, phoneme_ids))
+    q.put(None)  # sentinel
+
+
+batch_queue = queue.Queue(maxsize=PREFETCH_BATCHES)
+data_iter = iter(dataset)
+
+# Start prefetching in background
+prefetch_thread = threading.Thread(
+    target=prefetch_worker, args=(data_iter, batch_queue), daemon=True
+)
+prefetch_thread.start()
 
 # ═══════════════════════════════════════════════════════════════════════
 # TRAINING
@@ -116,23 +147,19 @@ optimizer = torch.optim.AdamW(
     lr=LR,
 )
 
-print(f"Training for {NUM_STEPS} steps, batch size {BATCH_SIZE}...")
-data_iter = iter(dataset)
+print(f"Training for {NUM_STEPS} steps, batch size {BATCH_SIZE}, device={device}...")
 
 for step in range(1, NUM_STEPS + 1):
-    audio_arrays, phoneme_id_lists = collate_batch(data_iter)
-    B = len(audio_arrays)
-    if B < 2:
+    batch = batch_queue.get()
+    if batch is None:
         print("Ran out of data, stopping early.")
         break
 
-    # --- Audio path (frozen encoder + trainable projection) ---
-    mel_inputs = feature_extractor(
-        audio_arrays, sampling_rate=SAMPLE_RATE, return_tensors="pt",
-        padding="max_length", truncation=True,
-    )
-    mel = mel_inputs.input_features.to(device)  # [B, 80, 3000]
+    mel, phoneme_id_lists = batch
+    mel = mel.to(device)  # [B, 80, 3000]
+    B = mel.shape[0]
 
+    # --- Audio path (frozen encoder + trainable projection) ---
     with torch.no_grad():
         encoder_out = whisper_model.encoder(mel)
         hidden = encoder_out.last_hidden_state  # [B, T, 384]
