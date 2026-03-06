@@ -57,9 +57,10 @@ audio_proj = torch.nn.Sequential(
 # 6. Load trained weights if available
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _WEIGHTS_PATH = os.path.join(_SCRIPT_DIR, "wake_word_weights.pt")
+_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if os.path.exists(_WEIGHTS_PATH):
     try:
-        weights = torch.load(_WEIGHTS_PATH, weights_only=True, map_location="cpu")
+        weights = torch.load(_WEIGHTS_PATH, weights_only=True, map_location=_DEVICE)
         phoneme_embedding_table.load_state_dict(weights["phoneme_embedding_table"])
         text_proj.load_state_dict(weights["text_proj"])
         audio_proj.load_state_dict(weights["audio_proj"])
