@@ -1,3 +1,4 @@
+import os
 import struct
 
 import pyaudio
@@ -13,7 +14,7 @@ from transformers import WhisperFeatureExtractor, WhisperModel
 SAMPLE_RATE = 16000
 CHUNK_DURATION = 1.0  # seconds
 CHUNK_SAMPLES = int(SAMPLE_RATE * CHUNK_DURATION)
-SIMILARITY_THRESHOLD = 0.7
+SIMILARITY_THRESHOLD = 0.2
 
 # Standard ARPAbet phoneme set (stripped of stress digits)
 PHONEMES = [
@@ -54,13 +55,17 @@ audio_proj = torch.nn.Sequential(
 )
 
 # 6. Load trained weights if available
-import os
-if os.path.exists("wake_word_weights.pt"):
-    weights = torch.load("wake_word_weights.pt", weights_only=True)
-    phoneme_embedding_table.load_state_dict(weights["phoneme_embedding_table"])
-    text_proj.load_state_dict(weights["text_proj"])
-    audio_proj.load_state_dict(weights["audio_proj"])
-    print("Loaded trained weights from wake_word_weights.pt")
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_WEIGHTS_PATH = os.path.join(_SCRIPT_DIR, "wake_word_weights.pt")
+if os.path.exists(_WEIGHTS_PATH):
+    try:
+        weights = torch.load(_WEIGHTS_PATH, weights_only=True, map_location="cpu")
+        phoneme_embedding_table.load_state_dict(weights["phoneme_embedding_table"])
+        text_proj.load_state_dict(weights["text_proj"])
+        audio_proj.load_state_dict(weights["audio_proj"])
+        print("Loaded trained weights from wake_word_weights.pt")
+    except Exception as e:
+        print(f"Warning: failed to load wake_word_weights.pt ({e}). Using random weights.")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -135,7 +140,7 @@ def enroll_wake_word(text: str):
     # Normalize for cosine similarity
     target_embedding = F.normalize(target_embedding, dim=-1)
 
-    torch.save(target_embedding, "wake_word_embedding.pt")
+    torch.save(target_embedding, os.path.join(_SCRIPT_DIR, "wake_word_embedding.pt"))
     print(f"Enrolled wake word: \"{text}\" ({len(phonemes)} phonemes: {phonemes})")
     return target_embedding
 
@@ -180,12 +185,11 @@ def listen_for_wake_word(target_embedding: torch.Tensor):
 # ═══════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    import os
-
-    if os.path.exists("wake_word_embedding.pt"):
-        target = torch.load("wake_word_embedding.pt", weights_only=True)
+    _EMBEDDING_PATH = os.path.join(_SCRIPT_DIR, "wake_word_embedding.pt")
+    if os.path.exists(_EMBEDDING_PATH):
+        target = torch.load(_EMBEDDING_PATH, weights_only=True)
         print("Loaded existing wake word embedding.")
     else:
-        target = enroll_wake_word("Hey Amber")
+        target = enroll_wake_word("didgeridoo")
 
     listen_for_wake_word(target)
