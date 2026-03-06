@@ -184,7 +184,20 @@ def listen_for_wake_word(target_embedding: torch.Tensor):
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════
 
+def set_threshold(value: float):
+    global SIMILARITY_THRESHOLD
+    SIMILARITY_THRESHOLD = value
+
+
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--threshold", type=float, default=SIMILARITY_THRESHOLD,
+                        help=f"Cosine similarity threshold for detection (default: {SIMILARITY_THRESHOLD})")
+    args = parser.parse_args()
+    set_threshold(args.threshold)
+
     _EMBEDDING_PATH = os.path.join(_SCRIPT_DIR, "wake_word_embedding.pt")
     if os.path.exists(_EMBEDDING_PATH):
         target = torch.load(_EMBEDDING_PATH, weights_only=True)
